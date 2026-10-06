@@ -377,8 +377,6 @@
   </div>
 
   <div class="secao">
-    <button class="botao-sec" id="btnFotos" data-i18n="btn_fotos">Buscar fotos que faltam</button>
-    <div class="status-fotos" id="statusFotos"></div>
     <button class="botao-sec" id="btnExportar" data-i18n="btn_exportar">Baixar backup</button>
     <button class="botao-sec" id="btnImportar" data-i18n="btn_importar">Restaurar backup</button>
     <input type="file" id="arquivoBackup" accept=".json" hidden>
@@ -465,14 +463,6 @@
       <div class="so-wishlist"><label data-i18n="lbl_preco">Preço estimado (R$)</label><input name="preco" type="number" step="0.01"></div>
       <div class="so-wishlist"><label data-i18n="lbl_prio">Prioridade</label>
         <select name="prioridade"><option value="alta" data-i18n="prio_alta">Alta</option><option value="media" data-i18n="prio_media" selected>Média</option><option value="baixa" data-i18n="prio_baixa">Baixa</option></select>
-      </div>
-      <div class="inteiro">
-        <label data-i18n="lbl_foto">Foto</label>
-        <div class="linha-foto">
-          <button type="button" class="botao-sec" id="btnBuscarFoto" data-i18n="btn_buscar_foto">Buscar foto HD</button>
-          <span class="aviso" id="statusFoto"></span>
-        </div>
-        <div class="galeria" id="galeria"></div>
       </div>
       <div class="inteiro"><label data-i18n="lbl_link">Link da imagem</label><input name="imagem" placeholder="https://…"></div>
       <div class="inteiro"><label data-i18n="lbl_upload">…ou enviar sua própria foto</label><input type="file" id="fotoArquivo" accept="image/*"></div>
@@ -745,7 +735,19 @@ function salvar() {
   catch (e) { alert(t('erro_salvar')); return false; }
 }
 
+/* Remove as fotos que foram buscadas automaticamente (links da internet); fotos enviadas por você ficam */
+function limparFotosAuto(d) {
+  let mudou = false;
+  (d.relogios || []).forEach(r => {
+    if (r.imagem && !String(r.imagem).startsWith('data:') && (r.fotoAuto || /wikimedia\.org/.test(r.imagem))) {
+      r.imagem = ''; mudou = true;
+    }
+    delete r.fotoAuto; r.autoTentou = true;
+  });
+  return mudou;
+}
 let dados = carregar();
+if (limparFotosAuto(dados)) salvar();
 salvar();
 let abaAtual = 'colecao';
 let paginaAtual = 0;
@@ -840,31 +842,6 @@ async function buscarFotosCommons(consulta, minimoPalavras = 0) {
     .sort((a, b) => b.nota - a.nota);
 }
 
-let buscandoFotos = false;
-async function buscarFotosFaltando() {
-  if (buscandoFotos) return;
-  buscandoFotos = true;
-  const status = $('#statusFotos');
-  const pendentes = dados.relogios.filter(r => !r.imagem && !r.autoTentou);
-  let achadas = 0, semConexao = false;
-  for (const [n, r] of pendentes.entries()) {
-    status.textContent = t('foto_progresso', n + 1, pendentes.length);
-    r.autoTentou = true;
-    try {
-      const consulta = `${r.marca} ${r.modelo}`.trim();
-      const fotos = await buscarFotosCommons(consulta, Math.min(2, consulta.split(/\s+/).length));
-      if (fotos[0]) { r.imagem = fotos[0].url; r.fotoAuto = true; achadas++; }
-    } catch (e) {
-      r.autoTentou = false; // sem internet agora: tenta de novo outra vez
-      semConexao = true;
-      break;
-    }
-    salvar(); desenhar();
-    await new Promise(ok => setTimeout(ok, 350));
-  }
-  status.textContent = semConexao ? t('foto_sem_conexao') : (pendentes.length ? t('foto_achadas', achadas) : t('foto_todos'));
-  buscandoFotos = false;
-}
 
 /* ============================================================
    DESENHAR A MALETA
@@ -1029,7 +1006,7 @@ async function detalhesWikidata(itemId) {
   }
   return {
     fabricante,
-    imagem: arquivoFoto ? `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(arquivoFoto)}?width=${FOTO_LARGURA}` : ''
+    imagem: ''
   };
 }
 
@@ -1073,8 +1050,6 @@ function abrirForm(relogio = null, sugestao = {}) {
   const form = $('#formRelogio');
   form.reset();
   fotoEnviada = '';
-  $('#galeria').innerHTML = '';
-  $('#statusFoto').textContent = '';
   editandoId = relogio ? relogio.id : null;
   const lista = relogio ? relogio.lista : abaAtual;
   $('#tituloForm').textContent = relogio ? t('form_editar') : t('form_confira');
@@ -1097,28 +1072,6 @@ function mostrarPrevia(src) {
 }
 $('#formRelogio').elements.imagem.addEventListener('input', e => mostrarPrevia(e.target.value.trim()));
 
-// Galeria de fotos HD para escolher
-$('#btnBuscarFoto').onclick = async () => {
-  const f = $('#formRelogio').elements;
-  const consulta = `${f.marca.value} ${f.modelo.value}`.trim();
-  const status = $('#statusFoto'), galeria = $('#galeria');
-  if (!consulta) { status.textContent = t('foto_preencha'); return; }
-  status.textContent = t('foto_buscando'); galeria.innerHTML = '';
-  try {
-    const fotos = (await buscarFotosCommons(consulta)).slice(0, 9);
-    status.textContent = fotos.length ? t('foto_toque') : t('foto_nenhuma');
-    galeria.innerHTML = fotos.map(x => `<button type="button" data-url="${esc(x.url)}" title="${esc(x.titulo)}"><img src="${esc(x.url)}" alt="" loading="lazy" referrerpolicy="no-referrer"></button>`).join('');
-  } catch (e) {
-    status.textContent = t('foto_erro_commons');
-  }
-};
-$('#galeria').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-url]');
-  if (!b) return;
-  $('#formRelogio').elements.imagem.value = b.dataset.url;
-  fotoEnviada = '';
-  mostrarPrevia(b.dataset.url);
-});
 
 $('#fotoArquivo').addEventListener('change', async (e) => {
   const arquivo = e.target.files[0];
@@ -1146,7 +1099,6 @@ $('#formRelogio').addEventListener('submit', (e) => {
   }
   salvar(); desenhar();
   $('#modalForm').classList.remove('aberto');
-  buscarFotosFaltando(); // se o relógio novo ficou sem foto, procura uma em HD
 });
 
 /* ============================================================
@@ -1474,17 +1426,12 @@ function aplicarIdioma() {
 $('#idioma').onchange = (e) => {
   dados.usuario.idioma = e.target.value;
   salvar(); aplicarIdioma(); desenharUsuario(); desenhar();
-  $('#statusFotos').textContent = '';
 };
 document.querySelectorAll('.tema-seg button').forEach(b => b.addEventListener('click', () => {
   dados.usuario.tema = b.dataset.tema; salvar(); aplicarTema();
 }));
 modoEscuroDoSistema.addEventListener('change', () => { if (!dados.usuario.tema) aplicarTema(); });
 
-$('#btnFotos').onclick = () => {
-  dados.relogios.forEach(r => { if (!r.imagem) r.autoTentou = false; }); // tenta de novo os que falharam
-  buscarFotosFaltando();
-};
 
 $('#btnExportar').onclick = () => {
   const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
@@ -1498,7 +1445,7 @@ $('#arquivoBackup').onchange = async (e) => {
   try {
     const novo = JSON.parse(await e.target.files[0].text());
     if (!Array.isArray(novo.relogios)) throw new Error();
-    dados = novo; salvar(); aplicarIdioma(); desenharUsuario(); aplicarTema(); desenhar();
+    dados = novo; limparFotosAuto(dados); salvar(); aplicarIdioma(); desenharUsuario(); aplicarTema(); desenhar();
   } catch { alert(t('erro_backup')); }
 };
 
@@ -1506,7 +1453,6 @@ aplicarIdioma();
 desenharUsuario();
 aplicarTema();
 desenhar();
-buscarFotosFaltando(); // ao abrir, busca em HD as fotos que ainda faltam
 </script>
 </body>
 </html>
