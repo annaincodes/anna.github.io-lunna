@@ -339,6 +339,15 @@
   .lateral .botao-sec:hover { background: transparent; border-color: var(--capa); color: var(--destaque); }
   .avatar-acoes a, .avatar-acoes button { font-size: 11px; letter-spacing: .08em; }
 </style>
+<script>
+window.addEventListener('error', function (e) {
+  if (document.getElementById('avisoErro')) return;
+  var d = document.createElement('div'); d.id = 'avisoErro';
+  d.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#fff4f0;color:#6b2a1a;border:1px solid #d9a08c;border-radius:8px;padding:12px 14px;font:13px/1.4 sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.2)';
+  d.textContent = 'Algo deu errado ao abrir a maleta: ' + (e.message || 'erro desconhecido') + ' — seus dados continuam salvos no navegador.';
+  (document.body || document.documentElement).appendChild(d);
+});
+</script>
 </head>
 <body>
 
@@ -723,10 +732,18 @@ function dadosIniciais() {
   return { usuario, relogios };
 }
 
+/* Garante que os dados salvos (de qualquer versão) tenham o formato esperado */
+function normalizarDados(d) {
+  if (!d || typeof d !== 'object') throw new Error('dados inválidos');
+  if (!d.usuario || typeof d.usuario !== 'object') d.usuario = { nome: '', porPagina: 9 };
+  if (!Array.isArray(d.relogios)) d.relogios = [];
+  d.relogios = d.relogios.filter(r => r && typeof r === 'object');
+  return d;
+}
 function carregar() {
   try {
     const salvo = localStorage.getItem(CHAVE);
-    if (salvo) return JSON.parse(salvo);
+    if (salvo) return normalizarDados(JSON.parse(salvo));
   } catch (e) {}
   return dadosIniciais();
 }
@@ -1445,7 +1462,7 @@ $('#arquivoBackup').onchange = async (e) => {
   try {
     const novo = JSON.parse(await e.target.files[0].text());
     if (!Array.isArray(novo.relogios)) throw new Error();
-    dados = novo; limparFotosAuto(dados); salvar(); aplicarIdioma(); desenharUsuario(); aplicarTema(); desenhar();
+    dados = normalizarDados(novo); limparFotosAuto(dados); salvar(); aplicarIdioma(); desenharUsuario(); aplicarTema(); desenhar();
   } catch { alert(t('erro_backup')); }
 };
 
